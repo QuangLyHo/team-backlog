@@ -1,7 +1,9 @@
 package com.example.database_normalization.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +32,7 @@ import com.example.database_normalization.dto.TaskRequest;
 import com.example.database_normalization.dto.TaskResponse;
 import com.example.database_normalization.entity.Project;
 import com.example.database_normalization.entity.Task;
+import com.example.database_normalization.entity.Team;
 import com.example.database_normalization.entity.User;
 import com.example.database_normalization.repository.ProjectRepository;
 import com.example.database_normalization.repository.TaskRepository;
@@ -51,6 +54,9 @@ public class TaskServiceTest {
     @Mock
     UserRepository userRepository;
 
+    @Mock
+    TeamService teamService;
+
     @InjectMocks
     private TaskService taskService;
 
@@ -67,24 +73,31 @@ public class TaskServiceTest {
     }
 
     @Test
-    void getAllTasks_delegatesToRepositoryAndReturnsResult() {
+    void getAllTasks_delegatesToTeamScopedRepositoryAndReturnsResult() {
+        User currentUser = new User();
+        currentUser.setEmail("admin@example.com");
+
         Task task = new Task();
         task.setTitle("Fix login bug");
 
         PageRequest pageable = PageRequest.of(0, 10);
         Page<Task> taskPage = new PageImpl<>(List.of(task), pageable, 1);
 
-        when(taskRepository.findAll(pageable)).thenReturn(taskPage);
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(currentUser);
+        when(taskRepository.findByProject_Team_MembersContaining(currentUser, pageable)).thenReturn(taskPage);
 
         Page<TaskResponse> result = taskService.getAllTasks(pageable, null);
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().get(0).title()).isEqualTo("Fix login bug");
-        verify(taskRepository).findAll(pageable);
+        verify(taskRepository).findByProject_Team_MembersContaining(currentUser, pageable);
     }
 
     @Test
-    void getAllTasks_withStatusFilter_delegatesToFindByStatus() {
+    void getAllTasks_withStatusFilter_delegatesToTeamScopedFindByStatus() {
+        User currentUser = new User();
+        currentUser.setEmail("admin@example.com");
+
         Task task = new Task();
         task.setTitle("In progress task");
         task.setStatus(TaskStatus.in_progress);
@@ -92,12 +105,14 @@ public class TaskServiceTest {
         PageRequest pageable = PageRequest.of(0, 10);
         Page<Task> taskPage = new PageImpl<>(List.of(task), pageable, 1);
 
-        when(taskRepository.findByStatus(TaskStatus.in_progress, pageable)).thenReturn(taskPage);
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(currentUser);
+        when(taskRepository.findByProject_Team_MembersContainingAndStatus(currentUser, TaskStatus.in_progress, pageable))
+                .thenReturn(taskPage);
 
         Page<TaskResponse> result = taskService.getAllTasks(pageable, TaskStatus.in_progress);
 
         assertThat(result.getContent()).hasSize(1);
-        verify(taskRepository).findByStatus(TaskStatus.in_progress, pageable);
+        verify(taskRepository).findByProject_Team_MembersContainingAndStatus(currentUser, TaskStatus.in_progress, pageable);
         verify(taskRepository, never()).findAll(any(Pageable.class));
     }
 
@@ -200,38 +215,65 @@ public class TaskServiceTest {
     }
 
     @Test
-    void updateTask_whenUserIsAssignee_succeeds() {
-        User assignee = new User();
-        assignee.setEmail("assignee@example.com");
+    void updateTask_whenUserIsTeamMemberOfTasksProject_succeeds() {
+        Team team = new Team("Platform");
+        Project project = new Project();
+        project.setId(1L);
+        project.setTeam(team);
 
         Task existingTask = new Task();
         existingTask.setId(1L);
         existingTask.setTitle("Old title");
-        existingTask.setAssignees(Set.of(assignee));
+        existingTask.setProject(project);
 
-        TaskRequest request = new TaskRequest("New title", TaskStatus.todo, null, Set.of());
+        TaskRequest request = new TaskRequest("New title", TaskStatus.todo, 1L, Set.of());
 
         UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                "assignee@example.com", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                "member@example.com", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
         SecurityContextHolder.getContext().setAuthentication(authToken);
 
         when(taskRepository.findById(1L)).thenReturn(Optional.of(existingTask));
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(taskRepository.save(existingTask)).thenReturn(existingTask);
 
         Optional<TaskResponse> result = taskService.updateTask(1L, request);
 
         assertThat(result).isPresent();
         assertThat(result.get().title()).isEqualTo("New title");
+        verify(teamService, times(2)).checkMembership(team);
     }
 
     @Test
-    void updateTask_whenUserIsNotAssigneeOrAdmin_throwsAccessDeniedException() {
-        User assignee = new User();
-        assignee.setEmail("assignee@example.com");
+    void updateTask_whenUserIsNotTeamMemberOfTasksProject_throwsAccessDeniedException() {
+        Team team = new Team("Platform");
+        Project project = new Project();
+        project.setId(1L);
+        project.setTeam(team);
 
         Task existingTask = new Task();
         existingTask.setId(1L);
-        existingTask.setAssignees(Set.of(assignee));
+        existingTask.setProject(project);
+
+        TaskRequest request = new TaskRequest("New title", TaskStatus.todo, null, Set.of());
+
+        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                "outsider@example.com", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        SecurityContextHolder.getContext().setAuthentication(authToken);
+
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(existingTask));
+        doThrow(new AccessDeniedException("You are not a member of this team"))
+                .when(teamService).checkMembership(team);
+
+        assertThatThrownBy(() -> taskService.updateTask(1L, request))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTask_whenTaskHasNoProjectAndUserIsNotAdmin_throwsAccessDeniedException() {
+        Task existingTask = new Task();
+        existingTask.setId(1L);
 
         TaskRequest request = new TaskRequest("New title", TaskStatus.todo, null, Set.of());
 
@@ -270,6 +312,25 @@ public class TaskServiceTest {
         assertThat(result.project().id()).isEqualTo(1L);
         assertThat(result.project().name()).isEqualTo("Mobile App v1");
         verify(projectRepository).findById(1L);
+    }
+
+    @Test
+    void getTasksByProjectId_whenUserIsNotTeamMember_throwsAccessDeniedException() {
+        Team team = new Team("Platform");
+        Project project = new Project();
+        project.setId(1L);
+        project.setTeam(team);
+
+        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                "outsider@example.com", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        SecurityContextHolder.getContext().setAuthentication(authToken);
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        doThrow(new AccessDeniedException("You are not a member of this team"))
+                .when(teamService).checkMembership(team);
+
+        assertThatThrownBy(() -> taskService.getTasksByProjectId(1L))
+                .isInstanceOf(AccessDeniedException.class);
     }
 
     @Test
