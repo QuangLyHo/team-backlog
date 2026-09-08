@@ -25,33 +25,43 @@ function App() {
   }, [token]);
 
   if (!token) {
-    return <AuthPage onLogin={setToken} />
+    return <AuthPage onLogin={setToken} />;
   }
 
   if (!selectedTeam) {
-    return <TeamList
-      token={token}
-      onSelect={setSelectedTeam}
-      onLogout={() => setToken(null)}
-      onAuthError={handleAuthError} />;
+    return (
+      <TeamList
+        token={token}
+        onSelect={setSelectedTeam}
+        onLogout={() => setToken(null)}
+        onAuthError={handleAuthError}
+      />
+    );
   }
 
   if (!selectedProject) {
-    return <ProjectList
-      token={token}
-      team={selectedTeam}
-      onSelect={setSelectedProject}
-      onBack={() => setSelectedTeam(null)}
-      onLogout={() => setToken(null)}
-      onAuthError={handleAuthError} />;
+    return (
+      <ProjectList
+        token={token}
+        team={selectedTeam}
+        onSelect={setSelectedProject}
+        onBack={() => setSelectedTeam(null)}
+        onLogout={() => setToken(null)}
+        onAuthError={handleAuthError}
+      />
+    );
   }
 
   return (
     <div className="app-shell">
       <Brand />
       <div className="topbar">
-        <button className="btn-secondary" onClick={() => setSelectedProject(null)}>← Back to projects</button>
-        <button className="btn-secondary" onClick={() => setToken(null)}>Log out</button>
+        <button className="btn-secondary" onClick={() => setSelectedProject(null)}>
+          ← Back to projects
+        </button>
+        <button className="btn-secondary" onClick={() => setToken(null)}>
+          Log out
+        </button>
       </div>
 
       <h1>{selectedProject.name}</h1>
@@ -60,12 +70,14 @@ function App() {
         token={token}
         projectId={selectedProject.id}
         onCreated={() => setRefreshKey((k) => k + 1)}
-        onAuthError={handleAuthError} />
+        onAuthError={handleAuthError}
+      />
       <TaskList
         token={token}
         projectId={selectedProject.id}
         refreshKey={refreshKey}
-        onAuthError={handleAuthError} />
+        onAuthError={handleAuthError}
+      />
     </div>
   );
 }
