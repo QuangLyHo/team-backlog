@@ -2,14 +2,14 @@ name: CI
 
 on:
     push:
-        branches: [ main ]
+        branches: [ main, deployment ]
     pull_request:
         branches: [ main ]
 
 jobs:
     test:
         runs-on: ubuntu-latest
-        
+
         steps:
             - name: Get code
               uses: actions/checkout@v4
@@ -20,9 +20,8 @@ jobs:
                 distribution: temurin
                 java-version: '25'
                 cache: maven
-            
+
             - name: Run tests
               run: ./mvnw test
               env:
                 JWT_SECRET: ${{ secrets.JWT_SECRET }}
-                
