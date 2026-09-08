@@ -11,10 +11,11 @@ import org.springframework.stereotype.Repository;
 
 import com.example.database_normalization.entity.Task;
 import com.example.database_normalization.entity.TaskStatus;
+import com.example.database_normalization.entity.User;
 
 @Repository
 public interface TaskRepository extends JpaRepository<Task, Long> {
-    
+
     // @Query("SELECT DISTINCT t FROM Task t LEFT JOIN FETCH t.assignees")
     // List<Task> findAllWithAssignees();
 
@@ -22,5 +23,9 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Task> findByProjectIdWithAssignees(@Param("projectId") Long projectId);
 
     Page<Task> findByStatus(TaskStatus status, Pageable pageable);
+
+    Page<Task> findByProject_Team_MembersContaining(User user, Pageable pageable);
+
+    Page<Task> findByProject_Team_MembersContainingAndStatus(User user, TaskStatus status, Pageable pageable);
 
 }
